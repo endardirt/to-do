@@ -459,13 +459,20 @@ input:focus-visible {
   opacity: 0.45;
 }
 
-.task.drag-over > .task-row {
+.task.drag-over-inside > .task-row {
   border-color: #7b7de9;
 
   background: #f1f1ff;
+}
 
+.task.drag-over-before > .task-row {
   box-shadow:
     inset 0 3px 0 #7b7de9;
+}
+
+.task.drag-over-after > .task-row {
+  box-shadow:
+    inset 0 -3px 0 #7b7de9;
 }
 
 
@@ -536,6 +543,11 @@ input:focus-visible {
 .check-button.checked {
   border-color: #6365e6;
   background: #6365e6;
+}
+
+.check-button.derived {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .check-button.checked::after {
