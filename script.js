@@ -59,6 +59,7 @@ const toast =
 ========================================================= */
 
 loadTasks();
+resyncCompletion(tasks);
 loadTheme();
 render();
 
@@ -129,12 +130,33 @@ function normalizeTasks(list) {
 
 
 function saveTasks() {
+
+  resyncCompletion(tasks);
+
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify(tasks)
   );
 
   updateProgress();
+}
+
+
+/* =========================================================
+   AUTO-COMPLETE PARENTS BASED ON SUBTASKS
+========================================================= */
+
+function resyncCompletion(list) {
+
+  list.forEach(task => {
+
+    resyncCompletion(task.children);
+
+    if (task.children.length > 0) {
+      task.completed =
+        task.children.every(child => child.completed);
+    }
+  });
 }
 
 
@@ -167,7 +189,7 @@ function addSubtask(parentId) {
 
   if (!parent) return;
 
-  const child = createTask("New subtask");
+  const child = createTask("");
 
   parent.children.push(child);
   parent.collapsed = false;
@@ -175,7 +197,7 @@ function addSubtask(parentId) {
   saveTasks();
   render();
 
-  startEditing(child.id);
+  editTask(child.id, { isNew: true });
 }
 
 
@@ -262,6 +284,11 @@ function toggleTask(id) {
 
   if (!task) return;
 
+  if (task.children.length > 0) {
+    showToast("Complete all subtasks to complete this task");
+    return;
+  }
+
   task.completed = !task.completed;
 
   saveTasks();
@@ -313,19 +340,6 @@ function setAllCollapsed(collapsed) {
    EDIT TASK
 ========================================================= */
 
-function startEditing(id) {
-
-  const input = document.querySelector(
-    `.task-input[data-id="${CSS.escape(id)}"]`
-  );
-
-  if (!input) return;
-
-  input.focus();
-  input.select();
-}
-
-
 function finishEditing(id, value) {
 
   const task = findTask(id);
@@ -343,7 +357,7 @@ function finishEditing(id, value) {
 }
 
 
-function editTask(id) {
+function editTask(id, { isNew = false } = {}) {
 
   const task = findTask(id);
 
@@ -367,6 +381,10 @@ function editTask(id) {
   input.maxLength = 500;
   input.dataset.id = id;
 
+  if (isNew) {
+    input.placeholder = "Name this subtask...";
+  }
+
   title.replaceWith(input);
 
   input.focus();
@@ -374,11 +392,29 @@ function editTask(id) {
 
   let saved = false;
 
+  function discardIfEmpty() {
+
+    if (input.value.trim()) {
+      return false;
+    }
+
+    removeTaskFromList(tasks, id);
+
+    saveTasks();
+    render();
+
+    return true;
+  }
+
   function saveEdit() {
 
     if (saved) return;
 
     saved = true;
+
+    if (isNew && discardIfEmpty()) {
+      return;
+    }
 
     finishEditing(id, input.value);
   }
@@ -393,8 +429,16 @@ function editTask(id) {
     }
 
     if (event.key === "Escape") {
+
       saved = true;
-      render();
+
+      if (isNew) {
+        removeTaskFromList(tasks, id);
+        saveTasks();
+        render();
+      } else {
+        render();
+      }
     }
   });
 }
@@ -651,12 +695,29 @@ function renderTask(task, depth, query = "") {
     checkButton.classList.add("checked");
   }
 
-  checkButton.setAttribute(
-    "aria-label",
-    task.completed
-      ? "Mark task incomplete"
-      : "Mark task complete"
-  );
+  const hasChildren = task.children.length > 0;
+
+  if (hasChildren) {
+
+    checkButton.classList.add("derived");
+
+    checkButton.title =
+      "Completes automatically once all subtasks are done";
+
+    checkButton.setAttribute(
+      "aria-label",
+      "This task completes automatically once all subtasks are done"
+    );
+
+  } else {
+
+    checkButton.setAttribute(
+      "aria-label",
+      task.completed
+        ? "Mark task incomplete"
+        : "Mark task complete"
+    );
+  }
 
   checkButton.addEventListener("click", event => {
     event.stopPropagation();
@@ -780,7 +841,7 @@ function renderTask(task, depth, query = "") {
 
   /* Drag events */
 
-  setupDragEvents(wrapper, task);
+  setupDragEvents(wrapper, row, task);
 
 
   return wrapper;
@@ -812,9 +873,41 @@ function createActionButton(icon, label) {
    DRAG & DROP
 ========================================================= */
 
-function setupDragEvents(element, task) {
+const DRAG_OVER_CLASSES = [
+  "drag-over-before",
+  "drag-over-after",
+  "drag-over-inside"
+];
+
+
+function clearDragOverClasses() {
+
+  document
+    .querySelectorAll(DRAG_OVER_CLASSES.map(c => `.${c}`).join(","))
+    .forEach(item => {
+      item.classList.remove(...DRAG_OVER_CLASSES);
+    });
+}
+
+
+function getDropZone(event, row) {
+
+  const rect = row.getBoundingClientRect();
+  const offsetY = event.clientY - rect.top;
+  const ratio = rect.height ? offsetY / rect.height : 0.5;
+
+  if (ratio < 0.25) return "before";
+  if (ratio > 0.75) return "after";
+
+  return "inside";
+}
+
+
+function setupDragEvents(element, row, task) {
 
   element.addEventListener("dragstart", event => {
+
+    event.stopPropagation();
 
     draggedTaskId = task.id;
 
@@ -835,17 +928,14 @@ function setupDragEvents(element, task) {
 
     element.classList.remove("dragging");
 
-    document
-      .querySelectorAll(".drag-over")
-      .forEach(item => {
-        item.classList.remove("drag-over");
-      });
+    clearDragOverClasses();
   });
 
 
-  element.addEventListener("dragover", event => {
+  row.addEventListener("dragover", event => {
 
     event.preventDefault();
+    event.stopPropagation();
 
     if (!draggedTaskId) return;
 
@@ -857,31 +947,34 @@ function setupDragEvents(element, task) {
       return;
     }
 
-    element.classList.add("drag-over");
+    const zone = getDropZone(event, row);
+
+    clearDragOverClasses();
+    element.classList.add(`drag-over-${zone}`);
 
     event.dataTransfer.dropEffect = "move";
   });
 
 
-  element.addEventListener("dragleave", event => {
+  row.addEventListener("dragleave", event => {
 
     if (
       event.relatedTarget &&
-      element.contains(event.relatedTarget)
+      row.contains(event.relatedTarget)
     ) {
       return;
     }
 
-    element.classList.remove("drag-over");
+    element.classList.remove(...DRAG_OVER_CLASSES);
   });
 
 
-  element.addEventListener("drop", event => {
+  row.addEventListener("drop", event => {
 
     event.preventDefault();
     event.stopPropagation();
 
-    element.classList.remove("drag-over");
+    element.classList.remove(...DRAG_OVER_CLASSES);
 
     if (!draggedTaskId) return;
 
@@ -894,10 +987,20 @@ function setupDragEvents(element, task) {
       return;
     }
 
-    moveTaskAsChild(
-      draggedTaskId,
-      task.id
-    );
+    const zone = getDropZone(event, row);
+
+    if (zone === "inside") {
+      moveTaskAsChild(
+        draggedTaskId,
+        task.id
+      );
+    } else {
+      moveTaskToSibling(
+        draggedTaskId,
+        task.id,
+        zone
+      );
+    }
   });
 }
 
@@ -960,6 +1063,55 @@ function moveTaskAsChild(taskId, parentId) {
   render();
 
   showToast("Task moved");
+}
+
+
+function moveTaskToSibling(taskId, targetId, position) {
+
+  const task =
+    extractTask(tasks, taskId);
+
+  if (!task) return;
+
+  const targetInfo =
+    findListAndIndex(tasks, targetId);
+
+  if (!targetInfo) return;
+
+  const insertIndex =
+    position === "before"
+      ? targetInfo.index
+      : targetInfo.index + 1;
+
+  targetInfo.list.splice(insertIndex, 0, task);
+
+  saveTasks();
+  render();
+
+  showToast("Task moved");
+}
+
+
+function findListAndIndex(list, id) {
+
+  const index =
+    list.findIndex(task => task.id === id);
+
+  if (index !== -1) {
+    return { list, index };
+  }
+
+  for (const task of list) {
+
+    const found =
+      findListAndIndex(task.children, id);
+
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
 }
 
 
