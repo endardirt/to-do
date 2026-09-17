@@ -449,6 +449,20 @@ function editTask(id, { isNew = false } = {}) {
 function clearCompleted() {
 
   const before = countTasks(tasks);
+  const completed = countCompleted(tasks);
+
+  if (completed === 0) {
+    showToast("No completed tasks to clear");
+    return;
+  }
+
+  const confirmed = confirm(
+    `Are you sure you want to clear ${completed} completed ${
+      completed === 1 ? "task" : "tasks"
+    }?`
+  );
+
+  if (!confirmed) return;
 
   function removeCompleted(list) {
 
@@ -465,11 +479,6 @@ function clearCompleted() {
   removeCompleted(tasks);
 
   const after = countTasks(tasks);
-
-  if (before === after) {
-    showToast("No completed tasks to clear");
-    return;
-  }
 
   saveTasks();
   render();
