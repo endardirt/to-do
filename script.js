@@ -233,11 +233,12 @@ function deleteTask(id) {
 
   if (!task) return;
 
-  const confirmed = confirm(
-    task.children.length > 0
-      ? "This task contains subtasks. Delete the task and all of its subtasks?"
-      : "Delete this task?"
-  );
+  const hasChildren = task.children.length > 0;
+
+  if (hasChildren) {
+    const confirmed = confirm(
+      "This task contains subtasks. Delete the task and all of its subtasks?"
+    );
 
     if (!confirmed) return;
   }
@@ -450,20 +451,6 @@ function editTask(id, { isNew = false } = {}) {
 function clearCompleted() {
 
   const before = countTasks(tasks);
-  const completed = countCompleted(tasks);
-
-  if (completed === 0) {
-    showToast("No completed tasks to clear");
-    return;
-  }
-
-  const confirmed = confirm(
-    `Are you sure you want to clear ${completed} completed ${
-      completed === 1 ? "task" : "tasks"
-    }?`
-  );
-
-  if (!confirmed) return;
 
   function removeCompleted(list) {
 
@@ -481,6 +468,11 @@ function clearCompleted() {
 
   const after = countTasks(tasks);
 
+  if (before === after) {
+    showToast("No completed tasks to clear");
+    return;
+  }
+
   saveTasks();
   render();
 
@@ -490,6 +482,7 @@ function clearCompleted() {
     } cleared`
   );
 }
+
 
 /* =========================================================
    COUNT TASKS
