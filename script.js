@@ -233,15 +233,13 @@ function deleteTask(id) {
 
   if (!task) return;
 
-  const hasChildren = task.children.length > 0;
+  const confirmed = confirm(
+    task.children.length > 0
+      ? "This task contains subtasks. Delete the task and all of its subtasks?"
+      : "Delete this task?"
+  );
 
-  if (hasChildren) {
-    const confirmed = confirm(
-      "This task contains subtasks. Delete the task and all of its subtasks?"
-    );
-
-    if (!confirmed) return;
-  }
+  if (!confirmed) return;
 
   removeTaskFromList(tasks, id);
 
